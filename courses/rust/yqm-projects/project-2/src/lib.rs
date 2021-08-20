@@ -4,7 +4,7 @@ use serde::{Serialize, Deserialize};
 use serde_json::Deserializer;
 use std::fs;
 use std::fs::{File, DirEntry};
-use std::io::Write;
+use std::io::{Write, Seek, SeekFrom};
 use std::rc::Rc;
 
 
@@ -34,6 +34,17 @@ struct CommandPos {
     start_pos: u64,
     /// The length of value
     len: u64,
+}
+
+impl CommandPos {
+    /// Read command from the log file
+    pub fn get_command_with_pool(&self, file_pool: &mut FilePool) -> Result<Command> {
+        let file = file_pool.open(self.index)?;
+        let mut ref_file = file.as_ref();
+        ref_file.seek(SeekFrom::Start(self.start_pos)).map_err(KvStoreError::IOError)?;
+        let mut stream = Deserializer::from_reader(ref_file).into_iter::<Command>();
+        stream.next().ok_or(KvStoreError::OtherError("Got None from storage by cmd_pos".to_string()))?.map_err(KvStoreError::JSError)
+    }
 }
 
 /// FilePool is used to cache the open files
@@ -227,7 +238,17 @@ impl KvStore {
     }
     /// Get the value of key from KvStore
     pub fn get(&mut self, key: String) -> Result<Option<String>> {
-        Err(KvStoreError::OtherError("no implementation".to_string()))
+        match self.kv_map.get(&key) {
+            Some(cmd_pos) => {
+                match cmd_pos.get_command_with_pool(&mut self.file_pool)? {
+                    Command::Set(_, v) => Ok(Some(v)),
+                    // Error
+                    // _ => panic!("The command is not the Set Command"),
+                    _ => Err(KvStoreError::OtherError("The got command is not the Set".to_string())),
+                }
+            },
+            None => Ok(None),
+        }
     }
     /// Set value for key in KvStore
     pub fn set(&mut self, key: String, value: String) -> Result<()> {
