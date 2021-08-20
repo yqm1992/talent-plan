@@ -139,9 +139,14 @@ pub struct KvStore {
     file_pool: FilePool,
     /// The handle of current writing log file
     log_write_handle: LogWriteHandle,
+    /// The hint of compacting log
+    repeated_write_count: u64,
 }
 
 impl KvStore {
+    /// The threshold of trigger compacting log
+    const REWRITE_COUNT_THRESH: u64 = 10000;
+
     /// Judge if the given entry represents a log file (eg: 1.log)
     fn is_log_file(entry: &DirEntry) -> bool {
         let mut flag = false;
@@ -149,6 +154,21 @@ impl KvStore {
             flag = s.parse::<u64>().is_ok()
         }
         flag
+    }
+
+    /// get the root path of database
+    pub fn get_root_path_buf(&self) -> PathBuf {
+        self.root_dir_path_buf.clone()
+    }
+
+    /// Get log file's path buf of a given index
+    pub fn get_path_buf_by_index(&self, index: u64) -> PathBuf {
+        self.root_dir_path_buf.join(format!("{}.log", index))
+    }
+
+    /// Get a normal file's path buf of a given name
+    pub fn get_path_buf_by_name(&self, name: &str) -> PathBuf {
+        self.root_dir_path_buf.join(format!("{}.log", name))
     }
 
     /// Parse file to Commands, and replay them
@@ -233,6 +253,7 @@ impl KvStore {
                 file: new_file,
                 next_pos: 0,
             },
+            repeated_write_count: 0,
         };
         Ok(kv_store)
     }
@@ -255,7 +276,10 @@ impl KvStore {
         let start_pos = self.log_write_handle.next_pos;
         let cmd = Command::Set(key.clone(), value.clone());
         let len = self.append_to_log(&cmd).unwrap();
-        self.kv_map.insert(key, CommandPos{index: self.index(), start_pos, len});
+        let prev_val = self.kv_map.insert(key, CommandPos{index: self.index(), start_pos, len});
+        if let Some(_) = prev_val {
+            self.check_comapct_log()?;
+        }
         Ok(())
     }
     /// Remove a key from KvStore
@@ -264,11 +288,77 @@ impl KvStore {
             Some(_) => {
                 let cmd = Command::Remove(key.clone());
                 self.append_to_log(&cmd).unwrap();
+                self.check_comapct_log()?;
                 Ok(())
             },
             None => {
                 Err(KvStoreError::OtherError("Key not found".to_string()))
             },
         }
+    }
+
+    /// Compact the log if the repeated_write_count reach the threshold
+    fn check_comapct_log(&mut self) -> Result<()> {
+        self.repeated_write_count += 1;
+        if self.repeated_write_count >= KvStore::REWRITE_COUNT_THRESH {
+            self.compact_log_sync()?;
+            self.repeated_write_count = 0;
+        }
+        Ok(())
+    }
+
+    /// Compact the log
+    fn compact_log_sync(&mut self) -> Result<()> {
+        let compact_path_buf = self.get_path_buf_by_name("compact.log");
+        let new_name_path_buf = self.get_path_buf_by_index(self.index() + 1);
+        // Write command to the new log file
+        if compact_path_buf.exists() {
+            fs::remove_file(compact_path_buf.clone()).map_err(KvStoreError::IOError)?;
+        }
+        let mut new_log_write_handle = LogWriteHandle {
+            index: self.index() + 1,
+            file: File::create(compact_path_buf.clone()).map_err(KvStoreError::IOError)?,
+            next_pos: 0,
+        };
+
+        // copy value to the new_kv_map and compact.log
+        let mut new_kv_map = HashMap::with_capacity(self.kv_map.len());
+        for (key, cmd_pos)  in self.kv_map.iter() {
+            let start_pos = new_log_write_handle.next_pos;
+            let cmd = cmd_pos.get_command_with_pool(&mut self.file_pool).unwrap();
+            let len = new_log_write_handle.append_to_log(&cmd).unwrap();
+            new_kv_map.insert(key.clone(), CommandPos{index: new_log_write_handle.index, start_pos, len});
+        }
+
+        // rename compact.log to [num].log
+        // println!("compacted log file: {}", new_name_path_buf.display());
+        fs::rename(compact_path_buf, new_name_path_buf.clone()).map_err(KvStoreError::IOError)?;
+        // update kv_map and log_write_handle
+        self.kv_map = new_kv_map;
+        self.log_write_handle = new_log_write_handle;
+
+        // delete old log files
+        self.file_pool.clear();
+        self.drop_old_log_files()
+    }
+
+    /// Drop the old log files after compacting operation, called by compact_log_sync()
+    fn drop_old_log_files(&mut self) -> Result<()> {
+        // let log_entries =  self.root_path_buf.read_dir().expect("read_dir call failed").filter(is_log_file);
+        let log_entries =  self.get_root_path_buf().read_dir().map_err(KvStoreError::IOError)?.filter(|x| {
+            match x {
+                Ok(entry) => KvStore::is_log_file(entry),
+                Err(_) => false,
+            }
+        });
+        for item in log_entries {
+            let entry = item.map_err(|e| KvStoreError::OtherError(e.to_string()))?;
+            let index = entry.file_name().to_str().unwrap().strip_suffix(".log").unwrap().parse::<u64>().unwrap();
+            if index < self.index() {
+                // println!("drop old file: {}", entry.path().display());
+                fs::remove_file(entry.path()).map_err(KvStoreError::IOError)?;
+            }
+        }
+        Ok(())
     }
 }
