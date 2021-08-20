@@ -1,6 +1,7 @@
 extern crate clap;
 use std::env;
 use clap::{Arg, App, SubCommand};
+use kvs::{KvStore};
 
 fn main() {
     let matches = App::new(env!("CARGO_PKG_NAME"))
@@ -27,24 +28,35 @@ fn main() {
                 .required(true)))
         .get_matches();
 
+    // let mut kvstore = KvStore::open("data").unwrap();
+    let mut kvstore = KvStore::open(".").unwrap();
     if let Some(subname) = matches.subcommand_name() {
         if let Some(submatches) = matches.subcommand_matches(subname) {
             match subname {
                 "get" => {
-                    let _key = submatches.value_of("key").unwrap();
+                    let key = submatches.value_of("key").unwrap();
+                    match kvstore.get(key.to_string()) {
+                        Ok(Some(value)) => println!("{}", value),
+                        Ok(None) => println!("Key not found"),
+                        Err(e) => println!("{:?}", e)
+                    }
                 },
                 "set" => {
-                    let _key = submatches.value_of("key").unwrap();
-                    let _value = submatches.value_of("value").unwrap();
+                    let key = submatches.value_of("key").unwrap().to_owned();
+                    let value = submatches.value_of("value").unwrap().to_owned();
+                    kvstore.set(key, value).unwrap();
                 },
                 "rm"  => {
-                    let _key = submatches.value_of("key").unwrap();
+                    let key = submatches.value_of("key").unwrap();
+                    match kvstore.remove(key.to_string()) {
+                        Ok(_) => {},
+                        Err(_) => { println!("Key not found"); std::process::exit(1); },
+                    }
                 },
                 _     => unreachable!(),
             }
             // panic!("unimplemented");
-            eprintln!("unimplemented");
-            std::process::exit(1);
+            std::process::exit(0);
         } else {
             unreachable!()
         }
