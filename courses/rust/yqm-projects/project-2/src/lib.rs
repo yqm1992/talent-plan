@@ -260,6 +260,15 @@ impl KvStore {
     }
     /// Remove a key from KvStore
     pub fn remove(&mut self, key: String) -> Result<()> {
-        Err(KvStoreError::OtherError("no implementation".to_string()))
+        match self.kv_map.remove(&key) {
+            Some(_) => {
+                let cmd = Command::Remove(key.clone());
+                self.append_to_log(&cmd).unwrap();
+                Ok(())
+            },
+            None => {
+                Err(KvStoreError::OtherError("Key not found".to_string()))
+            },
+        }
     }
 }
