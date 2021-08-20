@@ -106,6 +106,19 @@ struct LogWriteHandle {
     next_pos: u64,
 }
 
+impl LogWriteHandle {
+    /// Serialize a command and append it to the log file
+    fn append_to_log(&mut self, cmd: &Command) -> Result<u64> {
+        let serialized = serde_json::to_vec(cmd).map_err(KvStoreError::JSError)?;
+        self.file.write_all(&serialized).map_err(KvStoreError::IOError)?;
+        // TODO: if append log needs the sync operation?
+        // self.file.sync_all().map_err(KvStoreError::IOError)?;
+        let len = serialized.len() as u64;
+        self.next_pos += len;
+        Ok(len)
+    }
+}
+
 pub struct KvStore {
     /// The root directory
     root_dir_path_buf: PathBuf,
@@ -183,6 +196,16 @@ impl KvStore {
         Ok((kv_map, file_pool, max_index))
     }
 
+    /// Return current writing log file's index
+    pub fn index(&self) -> u64 {
+        self.log_write_handle.index
+    }
+
+    /// Serialize a command and write it to the under storage
+    fn append_to_log(&mut self, cmd: &Command) -> Result<u64> {
+        self.log_write_handle.append_to_log(cmd)
+    }
+
     /// Open the database
     pub fn open(path: impl Into<PathBuf>) -> Result<KvStore> {
         let root_dir_path_buf = path.into();
@@ -208,7 +231,11 @@ impl KvStore {
     }
     /// Set value for key in KvStore
     pub fn set(&mut self, key: String, value: String) -> Result<()> {
-        Err(KvStoreError::OtherError("no implementation".to_string()))
+        let start_pos = self.log_write_handle.next_pos;
+        let cmd = Command::Set(key.clone(), value.clone());
+        let len = self.append_to_log(&cmd).unwrap();
+        self.kv_map.insert(key, CommandPos{index: self.index(), start_pos, len});
+        Ok(())
     }
     /// Remove a key from KvStore
     pub fn remove(&mut self, key: String) -> Result<()> {
