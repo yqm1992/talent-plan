@@ -1,3 +1,10 @@
+mod common;
+mod error;
+
+pub use common::Command;
+pub use error::{KvStoreError, Result};
+
+
 use std::collections::{HashMap, BTreeMap, VecDeque};
 use std::path::PathBuf;
 use serde::{Serialize, Deserialize};
@@ -7,23 +14,6 @@ use std::fs::{File, DirEntry};
 use std::io::{Write, Seek, SeekFrom};
 use std::rc::Rc;
 
-
-#[derive(Serialize, Deserialize, Debug)]
-pub enum Command {
-    Get(String),
-    Set(String, String),
-    Remove(String),
-}
-
-#[derive(Debug)]
-pub enum KvStoreError {
-    IOError(std::io::Error),
-    JSError(serde_json::Error),
-    ParseError(core::num::ParseIntError),
-    OtherError(String),
-}
-
-pub type Result<T> = std::result::Result<T, KvStoreError>;
 
 /// CommandPos is used to record the file position of a command
 #[derive(Debug)]
