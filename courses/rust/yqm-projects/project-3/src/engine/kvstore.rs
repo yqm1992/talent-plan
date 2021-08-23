@@ -73,6 +73,7 @@ impl FilePool {
                 let new_file = File::open(new_log_path_buf).map_err(KvStoreError::IOError)?;
                 let rc_file = Rc::new(new_file);
                 self.files_map.insert(index, rc_file.clone());
+                self.index_queue.push_back(index);
                 Ok(rc_file)
             },
         }
