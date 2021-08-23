@@ -1,6 +1,8 @@
 mod kvstore;
+mod sled_engine;
 
 pub use kvstore::KvStore;
+pub use sled_engine::SledEngine;
 
 use crate::*;
 
