@@ -1,0 +1,28 @@
+[package]
+name = "kvs"
+version = "0.1.0"
+authors = ["Yang Qiuming yqm1992ofq@qq.com"]
+description = "A Key-value store"
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+clap = "2.32.0"
+serde = {version = "1.0.127", features = ["derive"]}
+serde_json = "1.0.66"
+slog = "2.7.0"
+slog-term = "2.8.0"
+slog-async = "2.7.0"
+sled = "0.34.6"
+bstr = "0.2.16"
+
+[dev-dependencies]
+assert_cmd = "0.11"
+criterion = "0.2.11"
+crossbeam-utils = "0.6.5"
+predicates = "1.0.0"
+rand = "0.6.5"
+tempfile = "3.0.7"
+walkdir = "2.2.7"
+panic-control = "0.1.4"
